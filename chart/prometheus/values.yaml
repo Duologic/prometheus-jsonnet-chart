@@ -1,0 +1,49 @@
+alerts:
+  alertsRules: |
+    groups:
+        - name: prometheus-extra
+          rules:
+            - alert: PromScrapeFailed
+              annotations:
+                message: Prometheus failed to scrape a target {{ $labels.job }} / {{ $labels.instance }}
+              expr: |
+                up != 1
+              for: 15m
+              labels:
+                severity: warning
+            - alert: PromScrapeFlapping
+              annotations:
+                message: Prometheus target flapping {{ $labels.job }} / {{ $labels.instance }}
+              expr: |
+                avg_over_time(up[5m]) < 1
+              for: 15m
+              labels:
+                severity: warning
+            - alert: PromScrapeTooLong
+              annotations:
+                message: '{{ $labels.job }} / {{ $labels.instance }} is taking too long to scrape ({{ printf "%.1f" $value }}s)'
+              expr: |
+                scrape_duration_seconds > 60
+              for: 15m
+              labels:
+                severity: warning
+config:
+  prometheusYml:
+    global:
+      scrapeInterval: 15s
+prometheus:
+  ports:
+  - name: prometheus-http-metrics
+    port: 9090
+    targetPort: 9090
+  - name: http
+    port: 80
+    targetPort: 9090
+  type: ClusterIP
+recording:
+  recordingRules: |
+    groups:
+        - name: example
+          rules:
+            - expr: up
+              record: example:recording

@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "prometheus.fullname" . }}-prometheus
+  labels:
+    name: prometheus
+  {{- include "prometheus.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.prometheus.type }}
+  selector:
+    name: prometheus
+  {{- include "prometheus.selectorLabels" . | nindent 4 }}
+  ports:
+	{{- .Values.prometheus.ports | toYaml | nindent 2 -}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "prometheus.fullname" . }}-prometheus
+  labels:
+  {{- include "prometheus.labels" . | nindent 4 }}
+spec:
+  podManagementPolicy: Parallel
+  replicas: 1
+  selector:
+    matchLabels:
+      name: prometheus
+  serviceName: prometheus
+  template:
+    metadata:
+      annotations:
+        prometheus.io.path: /prometheus/metrics
+      labels:
+        name: prometheus
+    spec:
+      containers:
+      - args:
+        - --config.file=/etc/prometheus/prometheus.yml
+        - --web.listen-address=:9090
+        - --web.external-url=http://prometheus.{{ .Release.Namespace }}.svc.cluster.local/prometheus/
+        - --web.enable-admin-api
+        - --web.enable-lifecycle
+        - --web.route-prefix=/prometheus/
+        - --storage.tsdb.path=/prometheus/data
+        - --storage.tsdb.wal-compression
+        - --enable-feature=exemplar-storage
+        image: prom/prometheus:v2.31.1
+        imagePullPolicy: IfNotPresent
+        name: prometheus
+        ports:
+        - containerPort: 9090
+          name: http-metrics
+        resources:
+          limits:
+            cpu: 500m
+            memory: 2Gi
+          requests:
+            cpu: 250m
+            memory: 1536Mi
+        volumeMounts:
+        - mountPath: /prometheus
+          name: prometheus-data
+        - mountPath: /etc/prometheus
+          name: prometheus-config
+        - mountPath: /etc/prometheus/alerts
+          name: prometheus-alerts
+        - mountPath: /etc/prometheus/recording
+          name: prometheus-recording
+      - args:
+        - -v
+        - -t
+        - -p=/etc/prometheus
+        - curl
+        - -X
+        - POST
+        - --fail
+        - -o
+        - '-'
+        - -sS
+        - http://localhost:9090/prometheus/-/reload
+        image: weaveworks/watch:master-5fc29a9
+        imagePullPolicy: IfNotPresent
+        name: watch
+        volumeMounts:
+        - mountPath: /etc/prometheus
+          name: prometheus-config
+        - mountPath: /etc/prometheus/alerts
+          name: prometheus-alerts
+        - mountPath: /etc/prometheus/recording
+          name: prometheus-recording
+      securityContext:
+        fsGroup: 2000
+        runAsNonRoot: true
+        runAsUser: 1000
+      serviceAccount: prometheus
+      volumes:
+      - configMap:
+          name: prometheus-config
+        name: prometheus-config
+      - configMap:
+          name: prometheus-alerts
+        name: prometheus-alerts
+      - configMap:
+          name: prometheus-recording
+        name: prometheus-recording
+  updateStrategy:
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: prometheus-data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 300Gi
